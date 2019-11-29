@@ -23,11 +23,15 @@ void ring_buffer_free(ring_buffer * buf) {
 
 int ring_buffer_read(ring_buffer * buf, void * dest) {
     long count = atomic_load(&buf->count);
-    while (count > 0 && !atomic_compare_exchange_weak(&buf->count, &count, count - 1));
-    // return when nothing to read
-    if (count == 0) {
-        return 0;
-    }
+    do {
+        // return when nothing to read
+        if (count == 0) {
+            return 0;
+        }
+        if (atomic_compare_exchange_weak(&buf->count, &count, count - 1)) {
+            break;
+        }
+    } while (1);
     long idx = atomic_fetch_add_explicit(&buf->read_cursor, 1, memory_order_relaxed) % buf->capacity;
     // loop until ready to read
     while (!atomic_load_explicit(buf->buf_mark + idx, memory_order_acquire));
@@ -39,11 +43,15 @@ int ring_buffer_read(ring_buffer * buf, void * dest) {
 
 int ring_buffer_write(ring_buffer * buf, const void * src) {
     long count = atomic_load(&buf->count);
-    while (count < buf->capacity && !atomic_compare_exchange_weak(&buf->count, &count, count + 1));
-    // return when it is full
-    if (count == buf->capacity) {
-        return 0;
-    }
+    do {
+        // return when it is full
+        if (count == buf->capacity) {
+            return 0;
+        }
+        if (atomic_compare_exchange_weak(&buf->count, &count, count + 1)) {
+            break;
+        }
+    } while (1);
     long idx = atomic_fetch_add_explicit(&buf->write_cursor, 1, memory_order_relaxed) % buf->capacity;
     // loop until ready to write
     while (atomic_load_explicit(buf->buf_mark + idx, memory_order_acquire));
